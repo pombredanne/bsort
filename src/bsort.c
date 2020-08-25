@@ -7,30 +7,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-
-
-#define SWITCH_TO_SHELL 20
-
-
-int verbosity;
-
-
-struct sort {
-  int fd;
-  off_t size;
-  void *buffer;
-};
-
-
-static unsigned long getTick(void) {
-  struct timespec ts;
-  unsigned theTick = 0U;
-  clock_gettime( CLOCK_REALTIME, &ts );
-  theTick  = ts.tv_nsec / 1000000;
-  theTick += ts.tv_sec * 1000;
-  return theTick;
-}
-
+#include "bsort.h"
 
 static inline void
 shellsort(unsigned char *a,
@@ -83,9 +60,6 @@ radixify(unsigned char *buffer,
   long stack[stack_size];
   long stack_pointer;
   long last_position, last_value, next_value;
-
-  if (verbosity && digit == 0)
-    fprintf(stderr, "radixify(count=%ld, digit=%ld, char_start=%ld, char_stop=%ld, record_size=%ld, key_size=%ld, stack_size=%ld, cut_off=%ld)\n", count, digit, char_start, char_stop, record_size, key_size, stack_size, cut_off);
 
   for (x=char_start; x<=char_stop; x++) {
     counts[x] = 0;
@@ -209,7 +183,7 @@ error:
 }
 
 
-void close_sort(struct sort *sort) {
+int close_sort(struct sort *sort) {
   if (sort->buffer) {
     munmap(sort->buffer, sort->size);
     sort->buffer = 0;
@@ -217,105 +191,48 @@ void close_sort(struct sort *sort) {
   }
 
   if (sort->fd) {
-    close(sort->fd);
+    if (close(sort->fd) == -1) {
+      return(-1);
+    }
     sort->fd = 0;
   }
+
+  return(0);
 }
 
+int call_bsort
+        (char *p_file_name,
+         int p_key_size,
+         int p_record_size,
+         int p_stack_size,
+         int p_cut_off,
+         char p_file_not_binary)
+{
 
-int
-main(int argc, char *argv[]) {
-  int opt;
   int char_start = 0;
   int char_stop = 255;
-  int record_size=100;
-  int key_size=10;
-  int stack_size=5;
-  int cut_off = 4;
-  verbosity = 0;
-
-  while ((opt = getopt(argc, argv, "var:k:s:c:")) != -1) {
-    switch (opt) {
-    case 'v':
-      verbosity += 1;
-      break;
-    case 'a':
-      char_start = 32;
-      char_stop = 128;
-      break;
-    case 'r':
-      record_size = atoi(optarg);
-      break;
-    case 'k':
-      key_size = atoi(optarg);
-      break;
-    case 's':
-      stack_size = atoi(optarg);
-      break;
-    case 'c':
-      cut_off = atoi(optarg);
-    default:
-      fprintf(stderr, "Invalid parameter: -%c\n", opt);
-      goto failure;
-    }
+  if (p_file_not_binary == 1) {
+    char_start = 32;
+    char_stop = 128;
   }
 
-  if (optind >= argc) {
-    fprintf(stderr, "Expected argument after options\n");
-    goto failure;
-  }
+  struct sort sort;
+  if (-1==open_sort(p_file_name, &sort))
+    return(BSORT_FAILURE);
 
-  unsigned long TickStart = getTick();
+  radixify(sort.buffer,
+           sort.size / p_record_size,
+           0,
+           char_start,
+           char_stop,
+           p_record_size,
+           p_key_size,
+           p_stack_size,
+           p_cut_off);
 
-  while(optind < argc) {
-    if (verbosity)
-      printf("sorting %s\n", argv[optind]);
-    struct sort sort;
-    if (-1==open_sort(argv[optind], &sort))
-      goto failure;
+  if (-1==close_sort(&sort))
+    return(BSORT_FAILURE);
 
-    radixify(sort.buffer,
-             sort.size / record_size,
-             0,
-             char_start,
-             char_stop,
-             record_size,
-             key_size,
-             stack_size,
-             cut_off);
-    close_sort(&sort);
-    optind++;
-  }
+  return(BSORT_SUCCESS);
 
-  printf("Processing time: %.3f s\n", (float)(getTick() - TickStart) / 1000);
-
-  exit(0);
-failure:
-  fprintf(stderr,
-          "Usage: %s [-v] [-a] [-r ###] [-k ###] [-s ###] file1, file2 ... \n",
-          argv[0]);
-  fprintf(stderr,
-          "Individually sort binary files inplace with a radix sort\n"
-          "\n"
-          "Sorting Options:\n"
-          "\n"
-          "  -a       assume files are printable 7-bit ascii instead of binary\n"
-          "  -k ###   size of compariable section of record, in bytes (default 100)\n"
-          "  -r ###   size of overall record, in bytes.  (default 100)\n"
-          "\n"
-          "Options:\n"
-          "  -v  verbose output logging\n"
-          "\n"
-          "Tuning Options:\n"
-          "\n"
-          "  -s ###   pushahead stack size.  (default 12)\n"
-          "  -c ###   recursion limit after which to use shell sort (defaults to 4)\n"
-          "\n"
-          "Report bsort bugs to adam@pelotoncycle.com\n"
-         );
-  exit(1);
 }
-
-
-
-
