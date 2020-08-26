@@ -1,3 +1,6 @@
+2020-08-25 => Made a small change to allow this code to be used on a regular C code
+
+
 This repository is not maintained and will not be updated.
 
 ------
